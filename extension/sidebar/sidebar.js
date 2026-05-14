@@ -12,15 +12,26 @@
   let port = null;
   let isRunning = false;
 
+  function setStatus(kind, text) {
+    const strip = document.getElementById("status-strip");
+    const label = document.getElementById("status-text");
+    if (!strip || !label) return;
+    strip.className = `status-${kind}`;
+    label.textContent = text;
+  }
+
   function connect() {
     try {
       port = chrome.runtime.connect({ name: "sidebar" });
+      setStatus("ready", "준비됨");
       port.onMessage.addListener(handleBackgroundMessage);
       port.onDisconnect.addListener(() => {
         port = null;
+        setStatus("disconnected", "백그라운드 재연결 중");
         setTimeout(connect, 500);
       });
     } catch {
+      setStatus("disconnected", "백그라운드 연결 대기 중");
       setTimeout(connect, 1000);
     }
   }
@@ -32,17 +43,20 @@
       case "ASSISTANT_THINKING":
         removeById("thinking-msg");
         appendThinkingMessage();
+        setStatus("thinking", "페이지 분석 중");
         setRunning(true);
         break;
 
       case "ASSISTANT_MESSAGE":
         removeById("thinking-msg");
         appendMessage("assistant", msg.payload.text);
+        if (isRunning) setStatus("running", "실행 준비 중");
         break;
 
       case "ACTION_START": {
         const { action, stepIndex, total } = msg.payload;
         updateProgress(stepIndex, total);
+        setStatus("running", `실행 중 ${stepIndex + 1}/${total}`);
         appendActionMessage(
           `단계 ${stepIndex + 1}/${total}`,
           describeAction(action),
@@ -58,7 +72,8 @@
       case "ACTION_ERROR":
         removeById("thinking-msg");
         if (msg.payload.stepIndex >= 0) markStepError(msg.payload.stepIndex);
-        appendMessage("error", `오류: ${msg.payload.error}`);
+        appendErrorMessage(`오류: ${msg.payload.error}`);
+        setStatus("error", "오류 발생");
         setRunning(false);
         hideProgress();
         break;
@@ -66,17 +81,20 @@
       case "WAIT_FOR_USER":
         removeById("thinking-msg");
         appendWaitMessage(msg.payload.instruction);
+        setStatus("waiting", "사용자 확인 대기");
         break;
 
       case "AUTOMATION_COMPLETE":
         removeById("thinking-msg");
-        appendMessage("complete", "✅ 작업이 완료되었습니다!");
+        appendMessage("complete", "작업이 완료되었습니다.");
+        setStatus("ready", "완료됨");
         setRunning(false);
         hideProgress();
         break;
 
       case "CONVERSATION_CLEARED":
         clearMessagesUI();
+        setStatus("ready", "준비됨");
         break;
 
       case "HISTORY_LIST":
@@ -88,7 +106,8 @@
         break;
 
       case "SESSION_LOAD_ERROR":
-        appendMessage("error", `대화 불러오기 실패: ${msg.payload.error}`);
+        appendErrorMessage(`대화 불러오기 실패: ${msg.payload.error}`);
+        setStatus("error", "대화 불러오기 실패");
         break;
 
       case "SESSION_DELETED":
@@ -101,7 +120,8 @@
         break;
 
       case "SESSION_DELETE_ERROR":
-        appendMessage("error", `대화 삭제 실패: ${msg.payload.error}`);
+        appendErrorMessage(`대화 삭제 실패: ${msg.payload.error}`);
+        setStatus("error", "대화 삭제 실패");
         break;
 
       case "DB_STATS_RESULT": {
@@ -136,10 +156,36 @@
   const sendBtn = document.getElementById("send-btn");
   const stopBtn = document.getElementById("stop-btn");
   const userInput = document.getElementById("user-input");
+  const charCount = document.getElementById("char-count");
+  const maxInputLength = Number(userInput.getAttribute("maxlength") || 500);
+  let isComposingText = false;
+  let suppressNextEnter = false;
 
   sendBtn.addEventListener("click", sendMessage);
+  userInput.addEventListener("compositionstart", () => {
+    isComposingText = true;
+  });
+  userInput.addEventListener("compositionend", () => {
+    isComposingText = false;
+    setTimeout(updateInputState, 0);
+    setTimeout(() => {
+      suppressNextEnter = false;
+    }, 120);
+  });
   userInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
+      const composing = e.isComposing || e.keyCode === 229 || isComposingText;
+      if (composing) {
+        suppressNextEnter = true;
+        setTimeout(() => {
+          suppressNextEnter = false;
+        }, 120);
+        return;
+      }
+      if (suppressNextEnter) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       sendMessage();
     }
@@ -147,7 +193,17 @@
   userInput.addEventListener("input", () => {
     userInput.style.height = "auto";
     userInput.style.height = Math.min(userInput.scrollHeight, 120) + "px";
+    updateInputState();
   });
+  updateInputState();
+
+  function updateInputState() {
+    const len = userInput.value.length;
+    charCount.textContent = `${len}/${maxInputLength}`;
+    charCount.classList.toggle("near-limit", len >= Math.floor(maxInputLength * 0.9));
+    charCount.classList.toggle("at-limit", len >= maxInputLength);
+    sendBtn.disabled = isRunning || userInput.value.trim().length === 0;
+  }
 
   function sendMessage() {
     const text = userInput.value.trim();
@@ -155,9 +211,11 @@
     appendMessage("user", text);
     userInput.value = "";
     userInput.style.height = "auto";
+    updateInputState();
 
     if (!port) {
-      appendMessage("error", "백그라운드 연결이 끊겼습니다. 사이드패널을 다시 열어주세요.");
+      appendErrorMessage("백그라운드 연결이 끊겼습니다. 사이드패널을 다시 열어주세요.");
+      setStatus("disconnected", "백그라운드 연결 끊김");
       return;
     }
     port.postMessage({ type: "USER_MESSAGE", payload: { text } });
@@ -169,6 +227,7 @@
     hideProgress();
     removeById("thinking-msg");
     appendMessage("assistant", "작업이 중지되었습니다.");
+    setStatus("ready", "중지됨");
   });
 
   // ── 탐색 모드 토글 (DB 채우기) ────────────────────────────
@@ -500,6 +559,24 @@
     return el;
   }
 
+  function appendErrorMessage(text) {
+    const el = appendMessage("error", text);
+    const btn = document.createElement("button");
+    btn.className = "error-copy-btn";
+    btn.type = "button";
+    btn.textContent = "오류 복사";
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "복사됨";
+      } catch {
+        btn.textContent = "복사 실패";
+      }
+    });
+    el.appendChild(btn);
+    return el;
+  }
+
   function appendActionMessage(label, desc, id) {
     const el = document.createElement("div");
     el.className = "msg-bubble action";
@@ -594,6 +671,7 @@
     userInput.disabled = running;
     document.getElementById("quick-chips").classList.toggle("hidden", running);
     clearBtn.disabled = running;
+    updateInputState();
     if (!running) userInput.focus();
   }
 
