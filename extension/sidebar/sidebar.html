@@ -12,14 +12,41 @@
     <!-- 헤더 -->
     <header>
       <div class="header-left">
-        <span class="logo-icon">🧭</span>
+        <span class="logo-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8 4.8-2.2z"></path>
+          </svg>
+        </span>
         <span class="logo-text">DOM Navigator</span>
       </div>
       <div class="header-actions">
         <button id="explore-btn" class="explore-off" title="탐색 모드 (DB 채우기)">OFF</button>
-        <button id="history-btn" title="대화 내역" aria-label="대화 내역">📋</button>
-        <button id="clear-btn" title="세션 초기화" aria-label="세션 초기화">🗑</button>
-        <button id="settings-btn" title="설정" aria-label="설정">⚙</button>
+        <button id="history-btn" title="대화 내역" aria-label="대화 내역">
+          <svg class="header-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 6h13"></path>
+            <path d="M8 12h13"></path>
+            <path d="M8 18h13"></path>
+            <path d="M3 6h.01"></path>
+            <path d="M3 12h.01"></path>
+            <path d="M3 18h.01"></path>
+          </svg>
+        </button>
+        <button id="clear-btn" title="세션 초기화" aria-label="세션 초기화">
+          <svg class="header-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <path d="M19 6l-1 14H6L5 6"></path>
+            <path d="M10 11v5"></path>
+            <path d="M14 11v5"></path>
+          </svg>
+        </button>
+        <button id="settings-btn" title="설정" aria-label="설정">
+          <svg class="header-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04A1.8 1.8 0 0 0 14.8 19.6a1.8 1.8 0 0 0-1.08 1.65V21a2.1 2.1 0 0 1-4.2 0v-.06A1.8 1.8 0 0 0 8.45 19.3a1.8 1.8 0 0 0-1.98.36l-.04.04a2.1 2.1 0 0 1-2.97-2.97l.04-.04A1.8 1.8 0 0 0 3.86 15a1.8 1.8 0 0 0-1.65-1.08H2a2.1 2.1 0 0 1 0-4.2h.06A1.8 1.8 0 0 0 3.7 8.65a1.8 1.8 0 0 0-.36-1.98l-.04-.04a2.1 2.1 0 0 1 2.97-2.97l.04.04A1.8 1.8 0 0 0 8 4.06a1.8 1.8 0 0 0 1.08-1.65V2a2.1 2.1 0 0 1 4.2 0v.06A1.8 1.8 0 0 0 14.35 3.7a1.8 1.8 0 0 0 1.98-.36l.04-.04a2.1 2.1 0 0 1 2.97 2.97l-.04.04A1.8 1.8 0 0 0 19.6 8a1.8 1.8 0 0 0 1.65 1.08H22a2.1 2.1 0 0 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15z"></path>
+          </svg>
+        </button>
       </div>
     </header>
 
