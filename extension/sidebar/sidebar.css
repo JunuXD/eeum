@@ -105,6 +105,50 @@ header {
   background: rgba(255,255,255,0.15);
 }
 
+#status-strip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 7px 16px;
+  background: rgba(245,245,247,0.88);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  backdrop-filter: blur(14px);
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  flex-shrink: 0;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+#status-strip.status-thinking .status-dot,
+#status-strip.status-running .status-dot {
+  background: var(--accent);
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+#status-strip.status-waiting .status-dot {
+  background: var(--warning);
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+#status-strip.status-error .status-dot,
+#status-strip.status-disconnected .status-dot {
+  background: var(--danger);
+}
+
+@keyframes statusPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.45); opacity: 0.55; }
+}
+
 /* ── 탐색 모드 토글 (헤더) ── */
 #explore-btn {
   background: transparent;
@@ -495,6 +539,23 @@ header {
   color: #8b0000;
 }
 
+.error-copy-btn {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border: 1px solid rgba(139,0,0,0.18);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.65);
+  color: #8b0000;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.error-copy-btn:hover {
+  background: white;
+}
+
 .msg-bubble.wait-user {
   background: #e8f5e9;
   border-left: 3px solid var(--success);
@@ -589,6 +650,23 @@ header {
   font-size: 13px;
 }
 
+#input-meta {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 16px;
+  padding: 4px 2px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+#char-count.near-limit {
+  color: var(--warning);
+}
+
+#char-count.at-limit {
+  color: var(--danger);
+}
+
 #button-row {
   display: flex;
   gap: 8px;
@@ -617,6 +695,10 @@ header {
 }
 .btn-primary:hover  { background: var(--accent-hover); }
 .btn-primary:active { transform: scale(0.97); }
+.btn-primary:disabled {
+  background: #a9c7e6;
+  cursor: default;
+}
 
 .btn-secondary {
   background: var(--bg-primary);
