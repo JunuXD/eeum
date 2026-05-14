@@ -263,6 +263,75 @@
     setTimeout(() => overlay.remove(), 220);
   }
 
+  // 유저 클릭 대기 중에도 요소를 추적하는 영구 하이라이트.
+  // rAF 로 매 프레임 위치를 다시 잡아서 스크롤·sticky 모두 대응한다.
+  function persistentHighlight(el) {
+    const overlay = document.createElement("div");
+    overlay.setAttribute("data-eeum-highlight", "await");
+    overlay.style.cssText = [
+      "position:fixed",
+      "border:3px solid #f0a500",
+      "border-radius:6px",
+      "box-shadow:0 0 0 2px rgba(240,165,0,0.3), 0 0 18px rgba(240,165,0,0.7)",
+      "pointer-events:none",
+      "z-index:2147483647",
+      "animation:eeumPulse 1.2s ease-in-out infinite",
+    ].join(";");
+
+    if (!document.getElementById("eeum-pulse-style")) {
+      const style = document.createElement("style");
+      style.id = "eeum-pulse-style";
+      style.textContent =
+        "@keyframes eeumPulse{0%,100%{opacity:1}50%{opacity:0.55}}";
+      document.documentElement.appendChild(style);
+    }
+
+    document.documentElement.appendChild(overlay);
+
+    let alive = true;
+    function update() {
+      if (!alive) return;
+      const rect = el.getBoundingClientRect();
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      requestAnimationFrame(update);
+    }
+    update();
+
+    return () => {
+      alive = false;
+      overlay.remove();
+    };
+  }
+
+  // 하이라이트 된 요소를 유저가 클릭했는지 감시. 다른 곳을 클릭하면 false.
+  function waitForUserClick(targetEl, timeoutMs = 60000) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (matched) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("click", onClick, true);
+        clearTimeout(timer);
+        resolve({ userClicked: matched, timedOut: false });
+      };
+      const onClick = (e) => {
+        const t = e.target;
+        const matched = targetEl === t || targetEl.contains(t);
+        finish(matched);
+      };
+      document.addEventListener("click", onClick, true);
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("click", onClick, true);
+        resolve({ userClicked: false, timedOut: true });
+      }, timeoutMs);
+    });
+  }
+
   async function executeOne(action) {
     // navigate 는 페이지 전환이라 별도 처리
     if (action.type === "navigate") {
@@ -287,7 +356,7 @@
     const elements = extractElements();
 
     let index = -1;
-    if (action.type === "click_text") {
+    if (action.type === "click_text" || action.type === "await_click_text") {
       index = findByText(action.text, elements);
     } else if (action.xpath) {
       index = findIndexByXpath(action.xpath, elements);
@@ -303,6 +372,22 @@
     const el = elements[index]._el;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     await sleep(250);
+
+    // await_click / await_click_text 는 영구 하이라이트 + 유저 클릭 대기.
+    // 유저가 그 요소를 직접 클릭했는지(userClicked) 다음 액션 흐름에서 사용.
+    if (action.type === "await_click" || action.type === "await_click_text") {
+      const cleanup = persistentHighlight(el);
+      const { userClicked, timedOut } = await waitForUserClick(el);
+      cleanup();
+      const tag = el.tagName.toLowerCase();
+      const href = el.getAttribute("href");
+      const navigates =
+        userClicked &&
+        ((tag === "a" && href && !href.startsWith("#")) ||
+          el.getAttribute("type") === "submit");
+      return { ok: true, userClicked, timedOut, navigated: navigates, index };
+    }
+
     await highlightElement(el);
 
     switch (action.type) {

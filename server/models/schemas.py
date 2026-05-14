@@ -109,6 +109,16 @@ class HighlightAction(BaseModel):
     xpath: str
 
 
+class AwaitClickAction(BaseModel):
+    type: Literal["await_click"] = "await_click"
+    xpath: str
+
+
+class AwaitClickTextAction(BaseModel):
+    type: Literal["await_click_text"] = "await_click_text"
+    text: str
+
+
 NavigationStep = (
     NavigateAction
     | ClickAction
@@ -117,6 +127,8 @@ NavigationStep = (
     | SelectAction
     | ScrollAction
     | HighlightAction
+    | AwaitClickAction
+    | AwaitClickTextAction
     | WaitAction
     | WaitForUserAction
 )

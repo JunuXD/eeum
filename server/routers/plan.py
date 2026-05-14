@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
 from models.schemas import (
+    AwaitClickAction,
+    AwaitClickTextAction,
     ClickAction,
     ClickTextAction,
     DomElement,
@@ -61,12 +63,11 @@ def _action_from_llm(a: dict, elements: list[DomElement]):
     return None
 
 
-@router.post("/plan", response_model=PlanResponse)
-async def plan(req: PlanRequest) -> PlanResponse:
+async def _run_plan(req: PlanRequest, plan_fn) -> PlanResponse:
     session_id, expires_at = await session.touch_or_create(req.session_id)
 
     elements = req.current_elements or []
-    raw_plan = await llm.plan_actions(
+    raw_plan = await plan_fn(
         query=req.query,
         url=req.current_url or "",
         elements=elements,
@@ -85,3 +86,25 @@ async def plan(req: PlanRequest) -> PlanResponse:
         actions=actions,
         needs_more_elements=bool(raw_plan.get("needs_more_elements")),
     )
+
+
+def _defer_click(action):
+    # 사용자 의도가 "어디로 가줘"가 아닌 한 자동 클릭을 막고
+    # 하이라이트 + 클릭 대기 형태로 바꾼다. navigate/type/select/scroll은 그대로.
+    if isinstance(action, ClickAction):
+        return AwaitClickAction(xpath=action.xpath)
+    if isinstance(action, ClickTextAction):
+        return AwaitClickTextAction(text=action.text)
+    return action
+
+
+@router.post("/plan", response_model=PlanResponse)
+async def plan(req: PlanRequest) -> PlanResponse:
+    return await _run_plan(req, llm.plan_actions)
+
+
+@router.post("/plan/strict", response_model=PlanResponse)
+async def plan_strict(req: PlanRequest) -> PlanResponse:
+    resp = await _run_plan(req, llm.plan_actions_strict)
+    resp.actions = [_defer_click(a) for a in resp.actions]
+    return resp

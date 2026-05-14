@@ -322,6 +322,8 @@
       case "select":    return `"${action.value}" 선택`;
       case "scroll":    return `${action.direction === "down" ? "아래로" : "위로"} 스크롤 (${action.amount}px)`;
       case "highlight": return `요소 강조 (${action.xpath})`;
+      case "await_click": return `강조된 요소 클릭 대기 (${action.xpath})`;
+      case "await_click_text": return `"${action.text}" 클릭 대기`;
       case "wait":      return `${action.ms}ms 대기`;
       case "wait_for_user": return "사용자 확인 대기";
       default: return action.type;

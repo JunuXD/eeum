@@ -74,7 +74,7 @@ async function callDomUpload(payload) {
 
 async function callPlan(query, snapshot) {
   const sess = await getSession();
-  const data = await postJSON("/plan", {
+  const data = await postJSON("/plan/strict", {
     session_id: sess.session_id,
     query,
     current_url: snapshot.url,
@@ -198,6 +198,23 @@ async function runActions(actions, tabId, port) {
         runtime.resumeResolver = resolve;
       });
       runtime.resumeResolver = null;
+    }
+
+    // await_click 결과: 사용자가 강조된 요소를 클릭하지 않으면 시퀀스 중단.
+    if (action.type === "await_click" || action.type === "await_click_text") {
+      if (!result.userClicked) {
+        port?.postMessage({ type: "ACTION_DONE", payload: { stepIndex: i } });
+        const msg = result.timedOut
+          ? "대기 시간이 초과되어 작업을 중단합니다. 필요하면 다시 요청해주세요."
+          : "사용자가 다른 동작을 선택하여 이후 단계를 중단합니다.";
+        port?.postMessage({
+          type: "ASSISTANT_MESSAGE",
+          payload: { text: msg },
+        });
+        port?.postMessage({ type: "AUTOMATION_COMPLETE" });
+        runtime.running = false;
+        return;
+      }
     }
 
     port?.postMessage({ type: "ACTION_DONE", payload: { stepIndex: i } });

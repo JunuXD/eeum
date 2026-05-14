@@ -4,15 +4,18 @@
 
 설계 명세는 [`spec.md`](./spec.md) 참고. 현재 동작 구조는 아래 그대로.
 
-## 현재 아키텍처 (두 트랙 병존)
+## 현재 아키텍처 (세 트랙 병존)
 
 ```
 [Chrome Extension]                            [FastAPI 서버]
                                               ┌──────────────────────────────┐
-사이드패널 입력 ─────────────┐                │ POST /plan                   │ ← 현재 ★사용중★
-                            │                │   gpt-4o-mini chat.completions │
-                            ▼                │   capstone와 동일한 system prompt
-background.js ──────── POST /plan ──────────▶│   index→xpath 변환 후 응답   │
+사이드패널 입력 ─────────────┐                │ POST /plan/strict            │ ← 현재 ★사용중★
+                            │                │   gpt-4o-mini, temperature=0  │
+                            ▼                │   S1~S4 안전 / R1~R8 라우팅   │
+background.js ─── POST /plan/strict ────────▶│   click → await_click 후처리  │
+                                              │                              │
+                                              │ POST /plan                   │ ← 보존(비교용)
+                                              │   초기 flat-rule 시스템 프롬프트
                                               │                              │
 content.js (페이지 상태 바뀔 때)              │ POST /dom/check              │
    STATE_CHANGED                              │ POST /dom/upload             │
@@ -26,9 +29,21 @@ background.js ─── /dom/check ───────────────
                                               └──────────────────────────────┘
 ```
 
-- **활성 경로:** 익스텐션의 USER_MESSAGE → `/plan` (LLM 플래닝)
+- **활성 경로:** 익스텐션의 USER_MESSAGE → `/plan/strict` (구조화된 system prompt + 클릭 대기 후처리)
+- **비교용 경로:** `/plan`. 동일한 PlanRequest/PlanResponse 스키마지만 초기 flat-rule 프롬프트를 그대로 사용. 익스텐션은 호출하지 않음. curl 등으로 A/B 비교에 사용.
 - **백그라운드 누적:** content script가 페이지 상태 전이를 감지할 때마다 `/dom/check` → 캐시 미스면 `/dom/upload`. Qdrant와 Neo4j 인덱스가 계속 누적됨.
-- **레거시 경로:** `/query`. 임베딩 유사도 + Neo4j shortestPath로 동작. 익스텐션은 현재 호출하지 않음. 추후 LLM 없이 동작하는 모드를 다시 시험할 때 사용.
+- **레거시 경로:** `/query`. 임베딩 유사도 + Neo4j shortestPath로 동작. 추후 LLM 없이 동작하는 모드를 다시 시험할 때 사용.
+
+## 클릭 위임 정책 (strict 모드)
+
+`/plan/strict` 응답은 자동 클릭을 최소화하도록 후처리됨:
+
+- `navigate` / `type` / `select` / `scroll` → 즉시 실행 ("어디로 가줘"·"검색해줘" 형태는 자연스럽게 직진)
+- `click` → `await_click` 으로 변환. 클라이언트는 그 요소를 펄스 영구 하이라이트하고 사용자가 그 요소를 직접 클릭할 때까지 대기
+- `click_text` → `await_click_text` (텍스트 매칭, 동일하게 클릭 대기)
+- 사용자가 강조된 요소를 클릭 → 다음 액션 진행 (`navigated:true`로 표시되어 1.5s 페이지 정착 대기)
+- 사용자가 다른 곳을 클릭 → 시퀀스 중단 + 사이드패널에 안내
+- 60초 무반응 → 타임아웃 처리
 
 ## 디렉터리
 
@@ -36,14 +51,15 @@ background.js ─── /dom/check ───────────────
 eeum/
 ├── spec.md
 ├── README.md
+├── .vscode/settings.json            # 워크스페이스 인터프리터(server/.venv) + analysis 경로
 ├── server/
 │   ├── main.py                      # FastAPI 엔트리 (lifespan에서 Qdrant·Neo4j 초기화)
 │   ├── routers/
-│   │   ├── plan.py                  # POST /plan (LLM 플래닝)
+│   │   ├── plan.py                  # POST /plan, POST /plan/strict
 │   │   ├── query.py                 # POST /query (레거시, 임베딩+그래프)
 │   │   └── dom.py                   # POST /dom/check, POST /dom/upload
 │   ├── services/
-│   │   ├── llm.py                   # OpenAI chat.completions, system prompt
+│   │   ├── llm.py                   # SYSTEM_PROMPT(/plan) + STRICT_SYSTEM_PROMPT(/plan/strict)
 │   │   ├── session.py               # Redis 세션 (TTL 7d)
 │   │   ├── embedding.py             # OpenAI text-embedding-3-small
 │   │   ├── vector_store.py          # Qdrant (delete-then-upsert)
@@ -56,8 +72,8 @@ eeum/
 └── extension/
     ├── manifest.json                # MV3, sidePanel + scripting + webNavigation
     ├── config.js                    # SERVER_URL 등
-    ├── background.js                # service worker. /plan 호출, 액션 실행 파이프라인
-    ├── content.js                   # DOM 수집/observer/액션 실행/하이라이트
+    ├── background.js                # service worker. /plan/strict 호출, await_click 처리
+    ├── content.js                   # DOM 수집/observer/액션 실행/하이라이트/클릭 대기
     └── sidebar/                     # 사이드 패널 UI
         ├── sidebar.html
         ├── sidebar.css
@@ -139,7 +155,16 @@ uvicorn main:app --reload --port 8000
 
 ## API
 
-### `POST /plan` — LLM 기반 액션 플랜 (익스텐션이 사용)
+### `POST /plan/strict` — 구조화된 시스템 프롬프트 + 클릭 대기 (익스텐션이 사용)
+
+**요청 / 응답 스키마는 `/plan` 과 동일** (`PlanRequest` / `PlanResponse`).
+
+차이점:
+- **시스템 프롬프트 구조**
+  - `S1 ~ S4` — 안전 규칙 (위험 키워드 버튼, password input, 카드 정보 input, 캡차)
+  - `R1 ~ R8` — 라우팅 규칙 (매칭 없으면 needs_more_elements, 무관 링크 fallback 금지, 사용자 지정 사이트는 직진, 미등록 사이트 URL 추측 금지 등)
+- **temperature = 0**
+- **응답 후처리**: `click` → `await_click`, `click_text` → `await_click_text` 로 자동 치환. "어디로 가줘" 형태(navigate-only)는 변환 대상 없으므로 그대로 직진 실행.
 
 **요청**
 
@@ -153,42 +178,44 @@ uvicorn main:app --reload --port 8000
       "tag": "a",
       "text": "NAVER 로그인",
       "aria_label": "NAVER 로그인",
-      "role": null,
       "xpath": "/html/body/.../a[1]",
-      "id": null,
-      "href": "https://nid.naver.com/...",
-      "type": null,
-      "name": null,
-      "placeholder": null
-    },
-    "..."
+      "href": "https://nid.naver.com/..."
+    }
   ]
 }
 ```
 
-**응답**
+**응답** (클라이언트가 실제로 실행할 액션 — `click`이 `await_click`으로 치환된 모습)
 
 ```json
 {
   "session_id": "uuid...",
   "expires_at": "2026-05-18T...",
-  "explanation": "로그인 버튼을 클릭합니다.",
+  "explanation": "로그인 버튼을 강조했습니다. 직접 클릭해주세요.",
   "actions": [
-    { "type": "click", "xpath": "/html/body/.../a[1]" }
+    { "type": "await_click", "xpath": "/html/body/.../a[1]" }
   ],
   "needs_more_elements": false
 }
 ```
 
-내부적으로 `gpt-4o-mini` 채팅 호출 (JSON mode). LLM은 `index` 기반으로 액션을 반환하고, 서버가 클라이언트 실행에 쓰일 `xpath` 기반 액션으로 변환.
+### `POST /plan` — 초기 flat-rule 프롬프트 (비교용)
 
-지원 액션 타입:
+`/plan/strict` 과 동일한 PlanRequest/PlanResponse 스키마이지만:
+- 초기 flat-rule system prompt 사용
+- 클라이언트가 LLM이 낸 `click`/`click_text`를 그대로 실행 (자동 클릭)
+
+A/B 비교나 회귀 추적에 사용. 익스텐션은 호출하지 않음.
+
+### 지원 액션 타입
 
 | 타입 | 필드 | 설명 |
 |------|------|------|
 | `navigate` | `url` | 페이지 이동 |
-| `click` | `xpath` | 요소 클릭 |
-| `click_text` | `text` | 텍스트로 매칭해서 클릭 (`navigate` 이후 권장) |
+| `click` | `xpath` | 요소 클릭 (`/plan` 응답에서만) |
+| `click_text` | `text` | 텍스트로 매칭해서 클릭 (`/plan` 응답에서만) |
+| `await_click` | `xpath` | 영구 하이라이트 후 사용자 클릭 대기 (`/plan/strict`) |
+| `await_click_text` | `text` | 텍스트 매칭 + 사용자 클릭 대기 (`/plan/strict`) |
 | `type` | `xpath`, `value` | 입력 |
 | `select` | `xpath`, `value` | `<select>` 옵션 선택 |
 | `scroll` | `direction`("up"/"down"), `amount` | 스크롤 |
@@ -196,7 +223,7 @@ uvicorn main:app --reload --port 8000
 | `wait` | `ms` | 대기 |
 | `wait_for_user` | `instruction` | 사용자 확인 필요, 사이드패널에 "계속 진행" 버튼 표시 |
 
-LLM은 `발급/신청/구매/결제/주문/제출/확인/저장/완료/전송/예약/등록` 등 되돌리기 어려운 버튼은 직접 클릭하지 않고 `highlight` + `wait_for_user` 조합으로 사용자에게 위임하도록 system prompt에 명시되어 있음.
+strict 모드에서는 `발급/신청/구매/결제/주문/제출/전송/예약/등록/가입/삭제/동의` 키워드 버튼·password·카드 input은 시스템 프롬프트(S1~S4) 차원에서 `highlight` + `wait_for_user` 로 위임됨.
 
 ### `POST /dom/check` — 상태 캐시 확인 (자동 파이프라인)
 
@@ -263,7 +290,8 @@ Chrome MV3 사이드패널. 빌드 없이 unpacked로 로드.
 - **상태 변화 트리거**: ① `main/[role=main]/dialog/[role=tabpanel]` 컨테이너 교체, ② 인터랙션 요소 수 ±5 이상 변화, ③ URL 변경(`pushState`/`popstate`/`hashchange`).
 - **`trigger_xpath`**: 클릭 후 500ms 윈도우 내에 변화가 감지되면 그 클릭이 엣지의 `trigger_xpath` 로 기록.
 - **content script 중복 주입 방지**: `window.__EEUM_CONTENT_LOADED__` 가드.
-- **타겟 요소 하이라이트**: 액션 실행 직전에 `position:fixed` 오버레이로 600ms 강조 후 클릭. `highlight` 액션은 강조만 하고 클릭은 생략(`wait_for_user` 와 함께 사용자에게 위임).
+- **타겟 요소 하이라이트**: 자동 액션 직전에는 `position:fixed` 오버레이로 600ms 강조 후 진행. `highlight` 액션은 강조만 하고 클릭은 생략.
+- **클릭 대기 하이라이트**: `await_click(_text)` 액션은 주황색 펄스 영구 하이라이트(rAF 추적, 스크롤·sticky 대응) + capture-phase 클릭 리스너로 유저가 그 요소를 직접 클릭할 때까지 대기. 다른 곳을 클릭하면 시퀀스가 중단되고 사이드패널에 안내. 60초 무반응 시 타임아웃.
 
 ## 운영 메모
 
